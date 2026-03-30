@@ -1204,15 +1204,6 @@ void launch_fattn(
 
     const bool V_is_K_view = V->view_src && (V->view_src == K || (V->view_src == K->view_src && V->view_offs == K->view_offs));
 
-    {
-        static int vk_diag = 0;
-        if (vk_diag < 2) {
-            fprintf(stderr, "[FA] V_is_K_view=%d V->view_src=%p K->view_src=%p V->type=%d K->type=%d\n",
-                    V_is_K_view, (void*)V->view_src, (void*)K->view_src, V->type, K->type);
-            vk_diag++;
-        }
-    }
-
     const ggml_tensor * mask  = dst->src[3];
     const ggml_tensor * sinks = dst->src[4];
 

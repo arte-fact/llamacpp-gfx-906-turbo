@@ -189,15 +189,15 @@ static void turbo_shadow_sync(
 
     sh.filled = ne1;
 
-    T_f16        = *T;
-    T_f16.type   = GGML_TYPE_F16;
-    T_f16.data   = sh.buf;
-    T_f16.view_src  = nullptr;  // prevent V_is_K_view from treating V as K
+    T_f16           = *T;
+    T_f16.type      = GGML_TYPE_F16;
+    T_f16.data      = sh.buf;
+    T_f16.view_src  = nullptr;
     T_f16.view_offs = 0;
-    T_f16.nb[0]  = sizeof(half);
-    T_f16.nb[1]  = ne0 * sizeof(half);
-    T_f16.nb[2]  = ne0 * sh.capacity * sizeof(half);
-    T_f16.nb[3]  = ne0 * sh.capacity * ne2 * sizeof(half);
+    T_f16.nb[0]     = sizeof(half);
+    T_f16.nb[1]     = ne0 * sizeof(half);
+    T_f16.nb[2]     = ne0 * sh.capacity * sizeof(half);
+    T_f16.nb[3]     = ne0 * sh.capacity * ne2 * sizeof(half);
 }
 
 // GFX906 Q8 Flash Attention kernel
@@ -771,8 +771,8 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
         return;
     }
 
-    // Native turbo3 vec kernel (default) — correct for all tensor layouts
-    // Shadow cache needs further work (V_is_K_view fixed, but FA dispatch crashes)
+    // Native turbo3 vec kernel (default) — correct, handles all tensor layouts
+    // TODO: fix shadow cache (view_src + buffer fields cause FA crash when both K+V shadowed)
     {
         switch (ggml_cuda_get_best_fattn_kernel(ggml_cuda_get_device(), dst)) {
             case BEST_FATTN_KERNEL_NONE:
