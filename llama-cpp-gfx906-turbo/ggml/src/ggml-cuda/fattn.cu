@@ -133,34 +133,24 @@ static void turbo_shadow_sync(
     const int64_t ne1 = T->ne[1];
     const int64_t ne2 = T->ne[2];
 
-    bool need_full = false;
-
-    if (sh.src_data != T->data || sh.ne0 != ne0 || sh.ne2 != ne2) {
-        need_full = true;
-    }
-    if (ne1 < sh.filled) {
-        need_full = true;
-    }
-
-    if (ne1 > sh.capacity || need_full) {
+    // Always re-dequant fully — contiguous layout requires consistent head stride = ne0*ne1
+    // which changes as ne1 grows, so incremental fill is not possible with contiguous layout.
+    const size_t sz = ne0 * ne1 * ne2 * sizeof(half);
+    if (sh.capacity < ne1 || sh.ne0 != ne0 || sh.ne2 != ne2 || sh.src_data != T->data) {
         if (sh.buf) { CUDA_CHECK(cudaFree(sh.buf)); sh.buf = nullptr; }
-        int64_t new_cap = ne1 < 4096 ? 4096 : ne1 * 2;
-        const size_t sz = ne0 * new_cap * ne2 * sizeof(half);
         CUDA_CHECK(cudaMalloc(&sh.buf, sz));
-        sh.capacity = new_cap;
-        sh.filled   = 0;
+        sh.capacity = ne1;
         sh.ne0      = ne0;
         sh.ne2      = ne2;
         sh.src_data = T->data;
-        need_full   = true;
     }
 
-    const int64_t row_start = need_full ? 0        : sh.filled;
-    const int64_t n_rows    = need_full ? ne1      : ne1 - sh.filled;
+    const int64_t row_start = 0;
+    const int64_t n_rows    = ne1;
 
     if (n_rows > 0) {
         const int64_t dst_row_stride  = ne0;
-        const int64_t dst_head_stride = ne0 * sh.capacity;
+        const int64_t dst_head_stride = ne0 * ne1;  // contiguous layout: head stride = ne0 * ne1
 
         // kernel: src_row = src + head * src_nb2 + abs_row * src_nb1
         // Pass T->nb[1] and T->nb[2] in original order — the kernel parameters
@@ -187,8 +177,8 @@ static void turbo_shadow_sync(
         }
     }
 
-    sh.filled = ne1;
-
+    // Build T_f16 that looks contiguous to FA — use ne1 (actual fill) not capacity for strides.
+    // This makes ggml_is_contiguously_allocated() return true and avoids FA re-conversion paths.
     T_f16           = *T;
     T_f16.type      = GGML_TYPE_F16;
     T_f16.data      = sh.buf;
@@ -196,8 +186,8 @@ static void turbo_shadow_sync(
     T_f16.view_offs = 0;
     T_f16.nb[0]     = sizeof(half);
     T_f16.nb[1]     = ne0 * sizeof(half);
-    T_f16.nb[2]     = ne0 * sh.capacity * sizeof(half);
-    T_f16.nb[3]     = ne0 * sh.capacity * ne2 * sizeof(half);
+    T_f16.nb[2]     = ne0 * ne1 * sizeof(half);
+    T_f16.nb[3]     = ne0 * ne1 * ne2 * sizeof(half);
 }
 
 // GFX906 Q8 Flash Attention kernel
@@ -771,9 +761,10 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
         return;
     }
 
-    // Native turbo3 vec kernel (default) — correct, handles all tensor layouts
-    // TODO: fix shadow cache (view_src + buffer fields cause FA crash when both K+V shadowed)
-    {
+    // Shadow cache: full dequant K+V to contiguous fp16, then fast f16 FA
+    // Set GGML_TURBO_DECODE_NATIVE=1 for native turbo3 vec kernel (slower fallback)
+    static const bool turbo_native = (getenv("GGML_TURBO_DECODE_NATIVE") != nullptr);
+    if (turbo_native) {
         switch (ggml_cuda_get_best_fattn_kernel(ggml_cuda_get_device(), dst)) {
             case BEST_FATTN_KERNEL_NONE:
                 GGML_ABORT("fatal error");
