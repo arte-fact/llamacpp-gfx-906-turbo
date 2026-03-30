@@ -192,6 +192,8 @@ static void turbo_shadow_sync(
     T_f16        = *T;
     T_f16.type   = GGML_TYPE_F16;
     T_f16.data   = sh.buf;
+    T_f16.view_src  = nullptr;  // prevent V_is_K_view from treating V as K
+    T_f16.view_offs = 0;
     T_f16.nb[0]  = sizeof(half);
     T_f16.nb[1]  = ne0 * sizeof(half);
     T_f16.nb[2]  = ne0 * sh.capacity * sizeof(half);
@@ -769,8 +771,9 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
         return;
     }
 
-    // Native turbo3 vec kernel (default) — handles all tensor layouts correctly
-    // Shadow cache V dequant has layout bug — use GGML_TURBO_SHADOW_CACHE=1 to test
+    // Native turbo3 vec kernel (default) — correct for all layouts
+    // Shadow cache K works but V needs f16-turbo3_0 FA template (not yet created)
+    // Set GGML_TURBO_SHADOW_CACHE=1 for shadow K + native V (experimental)
     static const bool turbo_shadow = (getenv("GGML_TURBO_SHADOW_CACHE") != nullptr);
     if (!turbo_shadow) {
         switch (ggml_cuda_get_best_fattn_kernel(ggml_cuda_get_device(), dst)) {
@@ -806,9 +809,9 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
     if (turbo_k) {
         static int k_diag = 0;
         if (k_diag < 2) {
-            fprintf(stderr, "[SHADOW K] ne=(%ld,%ld,%ld,%ld) nb=(%ld,%ld,%ld,%ld) type=%d\n",
-                    (long)K->ne[0], (long)K->ne[1], (long)K->ne[2], (long)K->ne[3],
-                    (long)K->nb[0], (long)K->nb[1], (long)K->nb[2], (long)K->nb[3], K->type);
+            fprintf(stderr, "[SHADOW K] data=%p ne=(%ld,%ld,%ld,%ld) nb=(%ld,%ld,%ld,%ld)\n",
+                    K->data, (long)K->ne[0], (long)K->ne[1], (long)K->ne[2], (long)K->ne[3],
+                    (long)K->nb[0], (long)K->nb[1], (long)K->nb[2], (long)K->nb[3]);
             k_diag++;
         }
         turbo_fp16_shadow & shK = g_turbo_shadows[K->data];
@@ -819,9 +822,9 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
     if (turbo_v) {
         static int v_diag = 0;
         if (v_diag < 2) {
-            fprintf(stderr, "[SHADOW V] ne=(%ld,%ld,%ld,%ld) nb=(%ld,%ld,%ld,%ld) type=%d\n",
-                    (long)V->ne[0], (long)V->ne[1], (long)V->ne[2], (long)V->ne[3],
-                    (long)V->nb[0], (long)V->nb[1], (long)V->nb[2], (long)V->nb[3], V->type);
+            fprintf(stderr, "[SHADOW V] data=%p ne=(%ld,%ld,%ld,%ld) nb=(%ld,%ld,%ld,%ld)\n",
+                    V->data, (long)V->ne[0], (long)V->ne[1], (long)V->ne[2], (long)V->ne[3],
+                    (long)V->nb[0], (long)V->nb[1], (long)V->nb[2], (long)V->nb[3]);
             v_diag++;
         }
         turbo_fp16_shadow & shV = g_turbo_shadows[V->data];
