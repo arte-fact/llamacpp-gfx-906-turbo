@@ -771,11 +771,9 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
         return;
     }
 
-    // Native turbo3 vec kernel (default) — correct for all layouts
-    // Shadow cache K works but V needs f16-turbo3_0 FA template (not yet created)
-    // Set GGML_TURBO_SHADOW_CACHE=1 for shadow K + native V (experimental)
-    static const bool turbo_shadow = (getenv("GGML_TURBO_SHADOW_CACHE") != nullptr);
-    if (!turbo_shadow) {
+    // Native turbo3 vec kernel (default) — correct for all tensor layouts
+    // Shadow cache needs further work (V_is_K_view fixed, but FA dispatch crashes)
+    {
         switch (ggml_cuda_get_best_fattn_kernel(ggml_cuda_get_device(), dst)) {
             case BEST_FATTN_KERNEL_NONE:
                 GGML_ABORT("fatal error");
