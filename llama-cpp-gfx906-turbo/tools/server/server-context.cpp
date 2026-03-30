@@ -747,8 +747,8 @@ private:
 
         int n_ctx_slot = llama_n_ctx_seq(ctx);
         if (n_ctx_slot > n_ctx_train) {
-            SRV_WRN("the slot context (%d) exceeds the training context of the model (%d) - capping\n", n_ctx_slot, n_ctx_train);
-            n_ctx_slot = n_ctx_train;
+            SRV_WRN("the slot context (%d) exceeds the training context of the model (%d) - using YaRN extended context\n", n_ctx_slot, n_ctx_train);
+            // Don't cap — YaRN rope scaling handles extended context
         }
 
         slots.clear();
