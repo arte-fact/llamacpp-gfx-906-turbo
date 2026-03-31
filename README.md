@@ -2,7 +2,7 @@
 
 llama.cpp fork for **AMD MI50/MI60 (gfx906)** with **TurboQuant turbo3 KV cache compression**.
 
-Combines upstream llama.cpp with [iacopPBK](https://github.com/iacopPBK/llama.cpp-gfx906) gfx906 Wave64 kernels and [Madreag](https://github.com/Madreag/turbo3-cuda) TurboQuant CUDA port, plus 8 HIP-specific bug fixes for gfx906 correctness.
+Combines upstream llama.cpp with [iacopPBK](https://github.com/iacopPBK/llama.cpp-gfx906) gfx906 Wave64 kernels and [Madreag](https://github.com/Madreag/turbo3-cuda) TurboQuant CUDA port, plus 9 HIP-specific bug fixes for gfx906 correctness.
 
 ## Results
 
@@ -30,11 +30,11 @@ Tensor split: `7,8,8,8` — flags: `--no-mmap --no-warmup`
 | Model | Config | Gen tok/s | Why |
 |-------|--------|-----------|-----|
 | MoE 80B (3B active) | f16 + HIP graphs | 57 | Small weight reads, no pipeline impact |
-| Dense 9B (1 GPU) | turbo3 K+V | 57 | No pipeline bubbles |
-| Dense 24B (4 GPU PP) | turbo3 K+f16 V | 42 | Pipeline parallel overhead |
-| Dense 27B (4 GPU PP) | turbo3 K+V | 18 | Large model + pipeline bubbles |
+| Dense 9B (1 GPU) | turbo3 K+V shadow | 59 | No pipeline bubbles, shadow cache |
+| Dense 24B (4 GPU PP) | turbo3 K+V shadow | 21.5 | Pipeline parallel overhead |
+| Dense 27B (4 GPU PP) | turbo3 K+V shadow | 18.5 | Large model + pipeline bubbles |
 
-**Key insight**: gfx906 at batch=1 is **latency-bound** (10% bandwidth utilization), not bandwidth-bound. Both this fork and vllm-gfx906 hit the same ~56 tok/s ceiling on MoE models. Dense models suffer from pipeline parallelism bubbles — tensor parallelism (`--split-mode row`) would fix this but crashes on HIP.
+**Key insight**: gfx906 at batch=1 is **latency-bound** (10% bandwidth utilization), not bandwidth-bound. Both this fork and vllm-gfx906 hit the same ~56 tok/s ceiling on MoE models. Dense models suffer from pipeline parallelism bubbles. Tensor parallelism (`--split-mode row`) crashes on HIP because it requires P2P GPU access — vllm solves this via RCCL AllReduce over shared memory, which llama.cpp doesn't implement.
 
 ### gfx906-Optimized Quant Types
 
@@ -173,7 +173,7 @@ For context beyond 262K, add YaRN:
 
 ### HIP/gfx906 Bug Fixes
 
-8 bugs found and fixed during integration:
+9 bugs found and fixed during integration:
 
 | Bug | Fix | File |
 |-----|-----|------|
@@ -185,20 +185,21 @@ For context beyond 262K, add YaRN:
 | Missing WHT rotation in `build_attn(attn_kv_iswa)` | Add turbo WHT calls matching `attn_kv` overload | `llama-graph.cpp` |
 | HIP objects not position-independent | Add `-fPIC` to HIP compile flags | `CMakeLists.txt` |
 | CPU WHT uses K signs for V inverse rotation | Add V-specific sign arrays (`turbo_wht_s1_v/s2_v`) | `ops.cpp` |
+| Shadow cache non-contiguous layout breaks FA | Use contiguous strides (ne1 not capacity) + full re-dequant | `fattn.cu` |
 
 ## Known Limitations
 
-- **Shadow cache V dequant**: The bulk turbo3→fp16 V dequant has a tensor layout bug (4D view dimension ordering). The native FA vec kernel (default) works correctly but is ~18% slower than shadow cache would be.
-- **Tensor parallelism**: `--split-mode row` crashes on HIP/ROCm. Dense models on multi-GPU use pipeline parallelism which has bubble overhead at batch=1.
+- **Tensor parallelism**: `--split-mode row` crashes on HIP/ROCm — requires P2P GPU access which MI50 on PCIe doesn't support. vllm solves this with RCCL AllReduce over shared memory. Dense models on multi-GPU use pipeline parallelism (bubble overhead at batch=1).
 - **Hybrid SSM models**: May hang during warmup on gfx906 due to `SOLVE_TRI` — use `--no-warmup`.
-- **Speculative decoding**: Only works on pure transformer models, not hybrid SSM+attention.
+- **Speculative decoding**: Only works on pure transformer models (Devstral), not hybrid SSM+attention (Qwen3.5, Qwen3-Coder-Next).
+- **YaRN extended context**: Server slot context cap removed — full allocated context usable with YaRN rope scaling.
 
 ## Next Steps
 
-1. **Fix shadow cache V dequant** — handle variable 4D view layouts → recover 18% speed on turbo3
-2. **TP4 on ROCm** — fix `--split-mode row` for HIP → 2x dense model speed
-3. **Speculative decoding for hybrid SSM** — needs SSM state checkpointing for rollback
-4. **Fused MoE kernels** — `gfx906/fused/` has RMS+mul+MMQ fusion, reduce kernel launch count
+1. **TP4 on ROCm** — requires RCCL integration for cross-GPU AllReduce → 2x dense model speed
+2. **Speculative decoding for hybrid SSM** — needs SSM state checkpointing for rollback
+3. **Fused MoE kernels** — `gfx906/fused/` has RMS+mul+MMQ fusion, reduce kernel launch count
+4. **Incremental shadow cache** — current full re-dequant every pass; incremental would amortize cost
 
 ## Credits
 
