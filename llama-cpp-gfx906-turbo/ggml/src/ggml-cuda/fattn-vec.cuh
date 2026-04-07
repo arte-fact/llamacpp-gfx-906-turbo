@@ -43,7 +43,7 @@ static __global__ void flash_attn_ext_vec(
 #ifdef FLASH_ATTN_AVAILABLE
 
     // Skip unused kernel variants for faster compilation:
-    if (use_logit_softcap && !(D == 128 || D == 256)) {
+    if (use_logit_softcap && !(D == 128 || D == 256 || D == 512)) {
         GGML_UNUSED_VARS(Q, K, V, mask, sinks, KV_max, dst, dst_meta, scale,
             max_bias, m0, m1, n_head_log2, logit_softcap,
             ne00, ne01, ne02, ne03,
@@ -624,3 +624,6 @@ EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_Q8_0)
 EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_BF16)
 EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_TURBO2_0)
 EXTERN_DECL_FATTN_VEC_CASES(256, GGML_TYPE_TURBO3_0)
+
+// D=512 (Gemma4 global layers): only f16/f16 needed (head_dim>256 auto-promotes to f16)
+extern DECL_FATTN_VEC_CASE(512, GGML_TYPE_F16, GGML_TYPE_F16);

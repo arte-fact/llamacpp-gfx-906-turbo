@@ -1808,9 +1808,8 @@ ggml_tensor * llm_graph_context::build_attn_mha(
 
     ggml_tensor * cur;
 
-    // FA kernels only support head_dim <= 256 (and 576 for DeepSeek).
-    // For larger head_dim (e.g. Gemma4 global layers: head_dim=512), use matmul path.
-    const bool fa_head_dim_ok = (q->ne[0] <= 256) || (q->ne[0] == 576);
+    // FA kernels support head_dim <= 256, 512 (Gemma4 global layers), and 576 (DeepSeek).
+    const bool fa_head_dim_ok = (q->ne[0] <= 256) || (q->ne[0] == 512) || (q->ne[0] == 576);
     const bool use_flash_attn = cparams.flash_attn && kq_b == nullptr && fa_head_dim_ok;
     if (use_flash_attn) {
         GGML_ASSERT(kq_b == nullptr && "Flash attention does not support KQ bias yet");

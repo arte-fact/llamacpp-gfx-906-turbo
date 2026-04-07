@@ -484,6 +484,9 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     // Asymmetric turbo3 K (shadowed to f16) + q8_0 V
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16, GGML_TYPE_Q8_0)
 
+    // D=512 (Gemma4 global layers): head_dim > 256, KV auto-promoted to f16
+    FATTN_VEC_CASE(512, GGML_TYPE_F16, GGML_TYPE_F16)
+
     GGML_ABORT("fatal error");
 }
 
@@ -597,7 +600,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     }
 
     // For small batch sizes the vector kernel may be preferable over the kernels optimized for large batch sizes:
-    const bool can_use_vector_kernel = Q->ne[0] <= 256 && Q->ne[0] % 64 == 0 && K->ne[1] % FATTN_KQ_STRIDE == 0;
+    const bool can_use_vector_kernel = Q->ne[0] <= 512 && Q->ne[0] % 64 == 0 && K->ne[1] % FATTN_KQ_STRIDE == 0;
 
     // TurboQuant: only the vec kernel has turbo dequant support.
     if (K->type == GGML_TYPE_TURBO2_0 || V->type == GGML_TYPE_TURBO2_0 ||
@@ -718,6 +721,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
                                             (K->ne[0] != 40) &&
                                             (K->ne[0] != 80) &&
                                             (K->ne[0] != 112) &&
+                                            (K->ne[0] != 512) &&
                                             (K->ne[0] != 576);
 
         if (q8_head_size_supported) {
@@ -725,6 +729,11 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         }
     }
 #endif
+
+    // D>256 (e.g. Gemma4 global layers with head_dim=512): tile kernel has no config, use vec
+    if (can_use_vector_kernel && Q->ne[0] > 256) {
+        return BEST_FATTN_KERNEL_VEC;
+    }
 
     return BEST_FATTN_KERNEL_TILE;
 }
