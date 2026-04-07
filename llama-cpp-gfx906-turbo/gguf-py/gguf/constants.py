@@ -419,6 +419,7 @@ class MODEL_ARCH(IntEnum):
     GEMMA2           = auto()
     GEMMA3           = auto()
     GEMMA3N          = auto()
+    GEMMA4           = auto()
     GEMMA_EMBEDDING  = auto()
     STARCODER2       = auto()
     RWKV6            = auto()
@@ -537,6 +538,9 @@ class MODEL_TENSOR(IntEnum):
     FFN_NORM             = auto()
     FFN_PRE_NORM         = auto()
     FFN_POST_NORM        = auto()
+    FFN_POST_NORM_1      = auto() # gemma4
+    FFN_POST_NORM_2      = auto() # gemma4
+    FFN_PRE_NORM_2       = auto() # gemma4
     FFN_GATE             = auto()
     FFN_DOWN             = auto()
     FFN_UP               = auto()
@@ -558,6 +562,7 @@ class MODEL_TENSOR(IntEnum):
     ATTN_Q_NORM          = auto()
     ATTN_K_NORM          = auto()
     LAYER_OUT_NORM       = auto()
+    LAYER_OUT_SCALE      = auto() # gemma4
     PER_LAYER_TOKEN_EMBD = auto() # gemma3n
     PER_LAYER_MODEL_PROJ = auto() # gemma3n
     PER_LAYER_INP_GATE   = auto() # gemma3n
@@ -882,6 +887,7 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
     MODEL_ARCH.GEMMA2:           "gemma2",
     MODEL_ARCH.GEMMA3:           "gemma3",
     MODEL_ARCH.GEMMA3N:          "gemma3n",
+    MODEL_ARCH.GEMMA4:           "gemma4",
     MODEL_ARCH.GEMMA_EMBEDDING:  "gemma-embedding",
     MODEL_ARCH.STARCODER2:       "starcoder2",
     MODEL_ARCH.RWKV6:            "rwkv6",
@@ -1000,6 +1006,9 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.FFN_NORM:                  "blk.{bid}.ffn_norm",
     MODEL_TENSOR.FFN_PRE_NORM:              "blk.{bid}.ffn_norm",
     MODEL_TENSOR.FFN_POST_NORM:             "blk.{bid}.post_ffw_norm",
+    MODEL_TENSOR.FFN_POST_NORM_1:           "blk.{bid}.post_ffw_norm_1",
+    MODEL_TENSOR.FFN_POST_NORM_2:           "blk.{bid}.post_ffw_norm_2",
+    MODEL_TENSOR.FFN_PRE_NORM_2:            "blk.{bid}.pre_ffw_norm_2",
     MODEL_TENSOR.FFN_GATE:                  "blk.{bid}.ffn_gate",
     MODEL_TENSOR.FFN_DOWN:                  "blk.{bid}.ffn_down",
     MODEL_TENSOR.FFN_UP:                    "blk.{bid}.ffn_up",
@@ -1019,6 +1028,7 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.MOE_LATENT_DOWN:           "blk.{bid}.ffn_latent_down",      # nemotron 3 super
     MODEL_TENSOR.MOE_LATENT_UP:             "blk.{bid}.ffn_latent_up",        # nemotron 3 super
     MODEL_TENSOR.LAYER_OUT_NORM:            "blk.{bid}.layer_output_norm",
+    MODEL_TENSOR.LAYER_OUT_SCALE:           "blk.{bid}.layer_output_scale",
     MODEL_TENSOR.PER_LAYER_TOKEN_EMBD:      "per_layer_token_embd",           # gemma3n
     MODEL_TENSOR.PER_LAYER_MODEL_PROJ:      "per_layer_model_proj",           # gemma3n
     MODEL_TENSOR.PER_LAYER_PROJ_NORM:       "per_layer_proj_norm",            # gemma3n
@@ -2272,6 +2282,37 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.LAUREL_L,
         MODEL_TENSOR.LAUREL_R,
         MODEL_TENSOR.LAUREL_POST_NORM,
+    ],
+    MODEL_ARCH.GEMMA4: [
+        MODEL_TENSOR.TOKEN_EMBD,
+        MODEL_TENSOR.OUTPUT_NORM,
+        MODEL_TENSOR.ROPE_FREQS,
+        MODEL_TENSOR.ATTN_Q,
+        MODEL_TENSOR.ATTN_Q_NORM,
+        MODEL_TENSOR.ATTN_K,
+        MODEL_TENSOR.ATTN_K_NORM,
+        MODEL_TENSOR.ATTN_V,
+        MODEL_TENSOR.ATTN_OUT,
+        MODEL_TENSOR.ATTN_NORM,
+        MODEL_TENSOR.ATTN_POST_NORM,
+        MODEL_TENSOR.FFN_GATE,
+        MODEL_TENSOR.FFN_DOWN,
+        MODEL_TENSOR.FFN_UP,
+        MODEL_TENSOR.FFN_NORM,
+        MODEL_TENSOR.FFN_POST_NORM,
+        MODEL_TENSOR.FFN_POST_NORM_1,
+        MODEL_TENSOR.FFN_POST_NORM_2,
+        MODEL_TENSOR.FFN_PRE_NORM_2,
+        MODEL_TENSOR.FFN_GATE_INP,
+        MODEL_TENSOR.FFN_GATE_UP_EXP,
+        MODEL_TENSOR.FFN_DOWN_EXP,
+        MODEL_TENSOR.LAYER_OUT_SCALE,
+        MODEL_TENSOR.PER_LAYER_TOKEN_EMBD,
+        MODEL_TENSOR.PER_LAYER_MODEL_PROJ,
+        MODEL_TENSOR.PER_LAYER_PROJ_NORM,
+        MODEL_TENSOR.PER_LAYER_INP_GATE,
+        MODEL_TENSOR.PER_LAYER_PROJ,
+        MODEL_TENSOR.PER_LAYER_POST_NORM,
     ],
     MODEL_ARCH.GEMMA_EMBEDDING: [
         MODEL_TENSOR.TOKEN_EMBD,

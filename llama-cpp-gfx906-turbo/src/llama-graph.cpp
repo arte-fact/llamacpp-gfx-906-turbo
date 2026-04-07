@@ -1808,7 +1808,10 @@ ggml_tensor * llm_graph_context::build_attn_mha(
 
     ggml_tensor * cur;
 
-    const bool use_flash_attn = cparams.flash_attn && kq_b == nullptr;
+    // FA kernels only support head_dim <= 256 (and 576 for DeepSeek).
+    // For larger head_dim (e.g. Gemma4 global layers: head_dim=512), use matmul path.
+    const bool fa_head_dim_ok = (q->ne[0] <= 256) || (q->ne[0] == 576);
+    const bool use_flash_attn = cparams.flash_attn && kq_b == nullptr && fa_head_dim_ok;
     if (use_flash_attn) {
         GGML_ASSERT(kq_b == nullptr && "Flash attention does not support KQ bias yet");
 
@@ -2070,14 +2073,6 @@ ggml_tensor * llm_graph_context::build_attn(
     // TurboQuant pre-rotate-queries: O(d log d) WHT rotation via custom op
     // Q shape: (n_embd_head, n_head, n_tokens) — ne[0] divisible by 128
     // No reshape/cont/matmul needed — the custom kernel handles groups internally
-    {
-        static int diag_count = 0;
-        if (diag_count < 3) {
-            fprintf(stderr, "[TURBO_GRAPH] build_attn_kv il=%d k->type=%d (%s) q->ne[0]=%ld q->type=%d\n",
-                    il, k->type, ggml_type_name(k->type), (long)q->ne[0], q->type);
-            diag_count++;
-        }
-    }
     if (k->type == GGML_TYPE_TURBO2_0 || k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0) {
         if (q->ne[0] % 128 == 0) {
             if (!ggml_is_contiguous(q)) { q = ggml_cont(ctx0, q); }
@@ -2255,7 +2250,8 @@ ggml_tensor * llm_graph_context::build_attn(
     cb(cur, "kqv_out", il);
 
     // TurboQuant: inverse-rotate attention output back to original space
-    if (k->type == GGML_TYPE_TURBO2_0 || k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0) {
+    // Guard on V->type (V is what's rotated, output inherits V's rotated space).
+    if (v->type == GGML_TYPE_TURBO2_0 || v->type == GGML_TYPE_TURBO3_0 || v->type == GGML_TYPE_TURBO4_0) {
         if (cur->ne[0] % 128 == 0) {
             if (!ggml_is_contiguous(cur)) { cur = ggml_cont(ctx0, cur); }
             cur = ggml_turbo_wht(ctx0, cur, 1);  // 1 = inverse

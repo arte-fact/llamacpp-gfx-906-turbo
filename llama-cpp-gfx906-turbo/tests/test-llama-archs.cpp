@@ -91,6 +91,11 @@ static gguf_context_ptr get_gguf_ctx(const llm_arch arch, const bool moe) {
         n_head = 1;
         n_ff   = 96;
         n_layer = 22; // hparams.n_layer_kv_from_start = 20 is hardcoded
+    } else if (arch == LLM_ARCH_GEMMA4) {
+        n_embd = 64;
+        n_head = 1;
+        n_ff   = 96;
+        n_layer = 4;
     } else if (arch == LLM_ARCH_DEEPSEEK2
             || arch == LLM_ARCH_GLM_DSA
             || arch == LLM_ARCH_KIMI_LINEAR
@@ -167,7 +172,7 @@ static gguf_context_ptr get_gguf_ctx(const llm_arch arch, const bool moe) {
     ms.add_kv(LLM_KV_ATTENTION_RELATIVE_BUCKETS_COUNT, uint32_t(8));
     ms.add_kv(LLM_KV_ATTENTION_SLIDING_WINDOW,         n_ctx/8);
 
-    if (arch == LLM_ARCH_MIMO2 || arch == LLM_ARCH_STEP35) {
+    if (arch == LLM_ARCH_MIMO2 || arch == LLM_ARCH_STEP35 || arch == LLM_ARCH_GEMMA4) {
         std::vector<uint32_t> pattern;
         pattern.reserve(n_layer);
         for (uint32_t il = 0; il < n_layer; il++) {
@@ -185,6 +190,12 @@ static gguf_context_ptr get_gguf_ctx(const llm_arch arch, const bool moe) {
     ms.add_kv(LLM_KV_TOKENIZER_MODEL,         "no_vocab");
     // ms.add_kv(LLM_KV_DENSE_2_FEAT_OUT,     n_embd);
     // ms.add_kv(LLM_KV_DENSE_3_FEAT_IN,      n_embd);
+
+    if (arch == LLM_ARCH_GEMMA4) {
+        ms.add_kv(LLM_KV_EMBEDDING_LENGTH_PER_LAYER, uint32_t(16));
+        ms.add_kv(LLM_KV_ATTENTION_KEY_LENGTH_SWA,   n_embd_head);
+        ms.add_kv(LLM_KV_ATTENTION_VALUE_LENGTH_SWA,  n_embd_head);
+    }
 
     if (moe) {
         ms.add_kv(LLM_KV_EXPERT_FEED_FORWARD_LENGTH, n_ff);

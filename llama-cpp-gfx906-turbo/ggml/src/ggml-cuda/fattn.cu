@@ -29,22 +29,23 @@ static __global__ void k_turbo3_dequant_rows_f16(
 
     const int64_t local_row = blockIdx.x;
     const int64_t head      = blockIdx.y;
-    const int j = threadIdx.x;
-    if (j >= ne0 || local_row >= n_rows) return;
+    if (local_row >= n_rows) return;
 
     const int64_t abs_row = row_start + local_row;
-
     const char * src_row = src + head * src_nb2 + abs_row * src_nb1;
-    const int blk_idx  = j / QK_TURBO3;
-    const int j_in_blk = j % QK_TURBO3;
-    const block_turbo3_0 * blk = (const block_turbo3_0 *)src_row + blk_idx;
 
-    const float norm = __half2float(blk->norm);
-    const uint8_t low2 = (blk->qs[j_in_blk / 4] >> ((j_in_blk % 4) * 2)) & 0x3;
-    const uint8_t hi1  = (blk->signs[j_in_blk / 8] >> (j_in_blk % 8)) & 0x1;
-    const float val = C[low2 | (hi1 << 2)] * norm;
+    for (int j = threadIdx.x; j < ne0; j += blockDim.x) {
+        const int blk_idx  = j / QK_TURBO3;
+        const int j_in_blk = j % QK_TURBO3;
+        const block_turbo3_0 * blk = (const block_turbo3_0 *)src_row + blk_idx;
 
-    dst[head * dst_head_stride + abs_row * dst_row_stride + j] = __float2half(val);
+        const float norm = __half2float(blk->norm);
+        const uint8_t low2 = (blk->qs[j_in_blk / 4] >> ((j_in_blk % 4) * 2)) & 0x3;
+        const uint8_t hi1  = (blk->signs[j_in_blk / 8] >> (j_in_blk % 8)) & 0x1;
+        const float val = C[low2 | (hi1 << 2)] * norm;
+
+        dst[head * dst_head_stride + abs_row * dst_row_stride + j] = __float2half(val);
+    }
 }
 
 static __global__ void k_turbo2_dequant_rows_f16(
@@ -60,21 +61,22 @@ static __global__ void k_turbo2_dequant_rows_f16(
 
     const int64_t local_row = blockIdx.x;
     const int64_t head      = blockIdx.y;
-    const int j = threadIdx.x;
-    if (j >= ne0 || local_row >= n_rows) return;
+    if (local_row >= n_rows) return;
 
     const int64_t abs_row = row_start + local_row;
-
     const char * src_row = src + head * src_nb2 + abs_row * src_nb1;
-    const int blk_idx  = j / QK_TURBO2;
-    const int j_in_blk = j % QK_TURBO2;
-    const block_turbo2_0 * blk = (const block_turbo2_0 *)src_row + blk_idx;
 
-    const float norm = __half2float(blk->norm);
-    const uint8_t idx = (blk->qs[j_in_blk / 4] >> ((j_in_blk % 4) * 2)) & 0x3;
-    const float val = C[idx] * norm;
+    for (int j = threadIdx.x; j < ne0; j += blockDim.x) {
+        const int blk_idx  = j / QK_TURBO2;
+        const int j_in_blk = j % QK_TURBO2;
+        const block_turbo2_0 * blk = (const block_turbo2_0 *)src_row + blk_idx;
 
-    dst[head * dst_head_stride + abs_row * dst_row_stride + j] = __float2half(val);
+        const float norm = __half2float(blk->norm);
+        const uint8_t idx = (blk->qs[j_in_blk / 4] >> ((j_in_blk % 4) * 2)) & 0x3;
+        const float val = C[idx] * norm;
+
+        dst[head * dst_head_stride + abs_row * dst_row_stride + j] = __float2half(val);
+    }
 }
 
 static __global__ void k_turbo4_dequant_rows_f16(
@@ -91,27 +93,29 @@ static __global__ void k_turbo4_dequant_rows_f16(
 
     const int64_t local_row = blockIdx.x;
     const int64_t head      = blockIdx.y;
-    const int j = threadIdx.x;
-    if (j >= ne0 || local_row >= n_rows) return;
+    if (local_row >= n_rows) return;
 
     const int64_t abs_row = row_start + local_row;
     const char * src_row = src + head * src_nb2 + abs_row * src_nb1;
-    const int blk_idx  = j / QK_TURBO4;
-    const int j_in_blk = j % QK_TURBO4;
-    const block_turbo4_0 * blk = (const block_turbo4_0 *)src_row + blk_idx;
 
-    const float norm = __half2float(blk->norm);
+    for (int j = threadIdx.x; j < ne0; j += blockDim.x) {
+        const int blk_idx  = j / QK_TURBO4;
+        const int j_in_blk = j % QK_TURBO4;
+        const block_turbo4_0 * blk = (const block_turbo4_0 *)src_row + blk_idx;
 
-    int bit_offset = j_in_blk * 3;
-    int byte_idx = bit_offset / 8;
-    int bit_pos = bit_offset % 8;
-    uint16_t raw = (uint16_t)blk->qs[byte_idx];
-    if (byte_idx + 1 < 48) raw |= (uint16_t)blk->qs[byte_idx + 1] << 8;
-    uint8_t idx = (uint8_t)((raw >> bit_pos) & 0x7);
+        const float norm = __half2float(blk->norm);
 
-    float val = C[idx] * norm;
+        int bit_offset = j_in_blk * 3;
+        int byte_idx = bit_offset / 8;
+        int bit_pos = bit_offset % 8;
+        uint16_t raw = (uint16_t)blk->qs[byte_idx];
+        if (byte_idx + 1 < 48) raw |= (uint16_t)blk->qs[byte_idx + 1] << 8;
+        uint8_t idx = (uint8_t)((raw >> bit_pos) & 0x7);
 
-    dst[head * dst_head_stride + abs_row * dst_row_stride + j] = __float2half(val);
+        float val = C[idx] * norm;
+
+        dst[head * dst_head_stride + abs_row * dst_row_stride + j] = __float2half(val);
+    }
 }
 
 struct turbo_fp16_shadow {
@@ -156,20 +160,21 @@ static void turbo_shadow_sync(
         // Pass T->nb[1] and T->nb[2] in original order — the kernel parameters
         // match the tensor view dimensions directly.
         dim3 grid((int)n_rows, (int)ne2);
+        const int threads = ne0 > 1024 ? 1024 : (int)ne0;  // cap for large n_embd_k_gqa (e.g. Gemma4 global layers)
         if (T->type == GGML_TYPE_TURBO4_0) {
-            k_turbo4_dequant_rows_f16<<<grid, (int)ne0, 0, stream>>>(
+            k_turbo4_dequant_rows_f16<<<grid, threads, 0, stream>>>(
                 (const char *)T->data, sh.buf, ne0,
                 row_start, n_rows,
                 T->nb[1], T->nb[2],
                 dst_row_stride, dst_head_stride);
         } else if (T->type == GGML_TYPE_TURBO2_0) {
-            k_turbo2_dequant_rows_f16<<<grid, (int)ne0, 0, stream>>>(
+            k_turbo2_dequant_rows_f16<<<grid, threads, 0, stream>>>(
                 (const char *)T->data, sh.buf, ne0,
                 row_start, n_rows,
                 T->nb[1], T->nb[2],
                 dst_row_stride, dst_head_stride);
         } else {
-            k_turbo3_dequant_rows_f16<<<grid, (int)ne0, 0, stream>>>(
+            k_turbo3_dequant_rows_f16<<<grid, threads, 0, stream>>>(
                 (const char *)T->data, sh.buf, ne0,
                 row_start, n_rows,
                 T->nb[1], T->nb[2],
@@ -796,26 +801,12 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
     ggml_tensor dst_copy = *dst;
 
     if (turbo_k) {
-        static int k_diag = 0;
-        if (k_diag < 2) {
-            fprintf(stderr, "[SHADOW K] data=%p ne=(%ld,%ld,%ld,%ld) nb=(%ld,%ld,%ld,%ld)\n",
-                    K->data, (long)K->ne[0], (long)K->ne[1], (long)K->ne[2], (long)K->ne[3],
-                    (long)K->nb[0], (long)K->nb[1], (long)K->nb[2], (long)K->nb[3]);
-            k_diag++;
-        }
         turbo_fp16_shadow & shK = g_turbo_shadows[K->data];
         turbo_shadow_sync(K, shK, K_f16, stream);
         dst_copy.src[1] = &K_f16;
         dst_mod = &dst_copy;
     }
     if (turbo_v) {
-        static int v_diag = 0;
-        if (v_diag < 2) {
-            fprintf(stderr, "[SHADOW V] data=%p ne=(%ld,%ld,%ld,%ld) nb=(%ld,%ld,%ld,%ld)\n",
-                    V->data, (long)V->ne[0], (long)V->ne[1], (long)V->ne[2], (long)V->ne[3],
-                    (long)V->nb[0], (long)V->nb[1], (long)V->nb[2], (long)V->nb[3]);
-            v_diag++;
-        }
         turbo_fp16_shadow & shV = g_turbo_shadows[V->data];
         turbo_shadow_sync(V, shV, V_f16, stream);
         dst_copy.src[2] = &V_f16;

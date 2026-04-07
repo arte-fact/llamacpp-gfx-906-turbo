@@ -661,13 +661,6 @@ void ggml_cuda_op_set_rows_turbo3(
 
     const int is_v = turbo_is_v_tensor(dst) ? 1 : 0;
 
-    static int turbo3_set_rows_count = 0;
-    if (turbo3_set_rows_count < 3) {
-        fprintf(stderr, "[TURBO3 SET_ROWS] ne00=%ld ne01=%ld n_groups=%d is_v=%d\n",
-                (long)ne00, (long)ne01, n_groups_per_row, is_v);
-        turbo3_set_rows_count++;
-    }
-
     kernel_set_rows_turbo3<<<grid, block, 0, ctx.stream()>>>(
         src0_d, src1_d, dst_d, ne00, ne01, nb01, nb1, n_groups_per_row, is_v);
 }

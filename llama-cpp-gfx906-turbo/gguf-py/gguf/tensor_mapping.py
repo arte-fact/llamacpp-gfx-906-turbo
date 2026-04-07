@@ -411,6 +411,22 @@ class TensorNameMap:
             "model.layers.{bid}.post_moe_norm",               # grok-2
         ),
 
+        MODEL_TENSOR.FFN_POST_NORM_1: (
+            "model.layers.{bid}.post_feedforward_layernorm_1",  # gemma4
+        ),
+
+        MODEL_TENSOR.FFN_POST_NORM_2: (
+            "model.layers.{bid}.post_feedforward_layernorm_2",  # gemma4
+        ),
+
+        MODEL_TENSOR.FFN_PRE_NORM_2: (
+            "model.layers.{bid}.pre_feedforward_layernorm_2",   # gemma4
+        ),
+
+        MODEL_TENSOR.LAYER_OUT_SCALE: (
+            "model.layers.{bid}.layer_scalar",                  # gemma4
+        ),
+
         MODEL_TENSOR.FFN_GATE_INP: (
             "layers.{bid}.feed_forward.gate",                   # mixtral
             "model.layers.{bid}.block_sparse_moe.gate",         # mixtral phimoe
@@ -428,6 +444,7 @@ class TensorNameMap:
             "layers.{bid}.gate",                                # mistral-large
             "backbone.layers.{bid}.mixer.gate",                 # nemotron-h-moe
             "model.layers.{bid}.moe.gate",                      # step3.5
+            "model.layers.{bid}.router.proj",                    # gemma4
         ),
 
         MODEL_TENSOR.FFN_GATE_INP_SHEXP: (
@@ -570,6 +587,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.FFN_GATE_UP_EXP: (
             "model.layers.{bid}.mlp.experts.gate_up_proj",
+            "model.layers.{bid}.experts.gate_up_proj",           # gemma4
         ),
 
         MODEL_TENSOR.MOE_LATENT_DOWN: (
@@ -629,6 +647,7 @@ class TensorNameMap:
             "encoder.layers.{bid}.mlp.experts.mlp.w2",              # nomic-bert-moe
             "model.layers.{bid}.block_sparse_moe.experts.down",     # smallthinker
             "model.layers.{bid}.moe.down_proj",                     # step3.5
+            "model.layers.{bid}.experts.down_proj",                  # gemma4
         ),
 
         MODEL_TENSOR.FFN_DOWN_SHEXP: (

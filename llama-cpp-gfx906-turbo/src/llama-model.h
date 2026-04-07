@@ -270,6 +270,9 @@ struct llama_layer {
     struct ggml_tensor * ffn_norm         = nullptr;
     struct ggml_tensor * ffn_norm_b       = nullptr;
     struct ggml_tensor * ffn_post_norm    = nullptr;
+    struct ggml_tensor * ffn_post_norm_1  = nullptr; // gemma4
+    struct ggml_tensor * ffn_post_norm_2  = nullptr; // gemma4
+    struct ggml_tensor * ffn_pre_norm_2   = nullptr; // gemma4
     struct ggml_tensor * layer_out_norm   = nullptr;
     struct ggml_tensor * layer_out_norm_b = nullptr;
     struct ggml_tensor * ffn_norm_exps    = nullptr;
@@ -299,6 +302,9 @@ struct llama_layer {
     struct ggml_tensor * ffn_gate_exps_s   = nullptr;
     struct ggml_tensor * ffn_down_exps_s   = nullptr;
     struct ggml_tensor * ffn_up_exps_s     = nullptr;
+
+    // gemma4 MoE router scale
+    struct ggml_tensor * ffn_gate_inp_s   = nullptr;
 
     // ff MoE latent proj
     struct ggml_tensor * ffn_latent_down = nullptr;
@@ -447,6 +453,9 @@ struct llama_layer {
     struct ggml_tensor * laurel_l             = nullptr;
     struct ggml_tensor * laurel_r             = nullptr;
     struct ggml_tensor * laurel_post_norm     = nullptr;
+
+    // gemma4 layer output scale
+    struct ggml_tensor * out_scale = nullptr;
 
     // openai-moe
     struct ggml_tensor * attn_sinks = nullptr;

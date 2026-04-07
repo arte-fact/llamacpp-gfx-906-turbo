@@ -298,6 +298,11 @@ struct llm_tokenizer_bpe : llm_tokenizer {
                     "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s{512}(?!\\S)|\\s{256}(?!\\S)|\\s{128}(?!\\S)|\\s{64}(?!\\S)|\\s{32}(?!\\S)|\\s{16}(?!\\S)|\\s{8}(?!\\S)|\\s{4}(?!\\S)|\\s{1,2}(?!\\S)|\\s{1}",
                 };
                 break;
+            case LLAMA_VOCAB_PRE_TYPE_GEMMA4:
+                regex_exprs = {
+                    "[^\\n]+|[\\n]+",
+                };
+                break;
             case LLAMA_VOCAB_PRE_TYPE_DBRX:
             case LLAMA_VOCAB_PRE_TYPE_SMAUG:
                 regex_exprs = {
@@ -1623,6 +1628,7 @@ struct llama_vocab::impl {
     bool remove_extra_whitespaces   = false;
     bool escape_whitespaces         = true;
     bool treat_whitespace_as_suffix = false;
+    bool bpe_spm_style              = false;  // gemma4: BPE with SentencePiece-style ▁ encoding (not GPT-2 byte-level)
 
     std::unordered_map<std::string, llama_token> token_to_id;
     std::vector<token_data>                      id_to_token;
@@ -1772,8 +1778,11 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
             special_mask_id = 103;
 
             add_sep = true;
-        } else if (tokenizer_model == "gpt2") {
+        } else if (tokenizer_model == "gpt2" || tokenizer_model == "gemma4") {
             type = LLAMA_VOCAB_TYPE_BPE;
+            if (tokenizer_model == "gemma4") {
+                bpe_spm_style = true;  // gemma4 uses ▁ for spaces, not GPT-2 byte-level encoding
+            }
 
             // read bpe merges and populate bpe ranks
             const int merges_keyidx = gguf_find_key(ctx, kv(LLM_KV_TOKENIZER_MERGES).c_str());
@@ -1936,6 +1945,9 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
             } else if (
                     tokenizer_pre == "jais-2") {
                 pre_type = LLAMA_VOCAB_PRE_TYPE_JAIS2;
+            } else if (
+                    tokenizer_pre == "gemma4") {
+                pre_type = LLAMA_VOCAB_PRE_TYPE_GEMMA4;
             } else if (
                     tokenizer_pre == "jina-v1-en" ||
                     tokenizer_pre == "jina-v2-code" ||
@@ -3211,6 +3223,12 @@ int32_t llama_vocab::impl::token_to_piece(llama_token token, char * buf, int32_t
                     return _try_copy(token_text.data(), token_text.size());
                 }
                 if (attr & LLAMA_TOKEN_ATTR_NORMAL) {
+                    if (bpe_spm_style) {
+                        // gemma4: SentencePiece-style BPE, just unescape ▁ to space
+                        std::string result = token_text;
+                        llama_unescape_whitespace(result);
+                        return _try_copy(result.data(), result.size());
+                    }
                     std::string result = llama_decode_text(token_text);
                     return _try_copy(result.data(), result.size());
                 }

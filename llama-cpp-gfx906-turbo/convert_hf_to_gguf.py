@@ -6931,6 +6931,93 @@ class Gemma3Model(TextModel):
         yield from super().modify_tensors(data_torch, name, bid)
 
 
+@ModelBase.register("Gemma4ForCausalLM")
+class Gemma4Model(Gemma3Model):
+    model_arch = gguf.MODEL_ARCH.GEMMA4
+    norm_shift = 0.0  # Gemma4 does NOT add 1.0 to norm weights (unlike Gemma3)
+
+    def set_vocab(self):
+        self._set_vocab_gpt2()
+
+    def set_gguf_parameters(self):
+        super().set_gguf_parameters()
+        hparams = self.hparams
+
+        # per-layer sliding window pattern (boolean array, not integer period)
+        swa_pattern = hparams.get("sliding_window_pattern", [])
+        if swa_pattern:
+            self.gguf_writer.add_sliding_window_pattern(swa_pattern)
+
+        # per-layer embedding dimension
+        n_embd_per_layer = hparams.get("per_layer_embedding_size", 0)
+        if n_embd_per_layer:
+            self.gguf_writer.add_embedding_length_per_layer_input(n_embd_per_layer)
+
+        # MoE parameters
+        n_expert = hparams.get("num_local_experts", 0)
+        n_expert_used = hparams.get("num_experts_per_tok", 0)
+        if n_expert:
+            self.gguf_writer.add_expert_count(n_expert)
+            self.gguf_writer.add_expert_used_count(n_expert_used)
+        n_ff_exp = hparams.get("expert_intermediate_size", 0)
+        if n_ff_exp:
+            self.gguf_writer.add_expert_feed_forward_length(n_ff_exp)
+
+        # shared KV layers
+        n_kv_shared = hparams.get("num_kv_shared_layers", 0)
+        if n_kv_shared:
+            self.gguf_writer.add_shared_kv_layers(n_kv_shared)
+
+        # SWA-specific head dimensions
+        head_dim_swa = hparams.get("sliding_window_head_dim", 0)
+        if head_dim_swa:
+            self.gguf_writer.add_key_length_swa(head_dim_swa)
+            self.gguf_writer.add_value_length_swa(head_dim_swa)
+
+        # SWA RoPE frequency base
+        swa_rope = self.rope_parameters.get("sliding_window_attention", {})
+        swa_freq_base = swa_rope.get("rope_theta", 0)
+        if swa_freq_base:
+            self.gguf_writer.add_rope_freq_base_swa(swa_freq_base)
+
+        # add_bos_token = False (chat template already contains BOS)
+        self.gguf_writer.add_add_bos_token(False)
+
+    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
+        if "language_model." in name:
+            name = name.replace("language_model.", "")
+
+        elif name.startswith("multi_modal_projector.") or name.startswith("vision_tower.") \
+                or name.startswith("multimodal_projector.") or name.startswith("vision_model.") \
+                or name.startswith("audio_tower."):
+            return  # skip vision/audio tensors
+
+        # remove OOV rows in token_embd
+        if "embed_tokens.weight" in name:
+            tokens = self.get_vocab_base()[0]
+            data_torch = data_torch[:len(tokens)]
+
+        # handle per-layer token embeddings similarly
+        if "embed_tokens_per_layer.weight" in name:
+            tokens = self.get_vocab_base()[0]
+            data_torch = data_torch[:len(tokens)]
+
+        # router scale: store as scale variant of gate_inp
+        if name.endswith("router.scale"):
+            # rename to ffn_gate_inp.scale for GGUF
+            name = name.replace("router.scale", "router.proj")
+            yield from super().modify_tensors(data_torch, name.replace(".proj", ".scale_unused"), bid)
+            return
+
+        # Gemma4 norm weights do NOT need +1.0 shift (norm_shift = 0.0)
+        if name.endswith("norm.weight") or name.endswith("layernorm.weight") \
+                or name.endswith("layernorm_1.weight") or name.endswith("layernorm_2.weight") \
+                or name.endswith("layer_scalar.weight"):
+            data_torch = data_torch + self.norm_shift
+
+        yield from super(Gemma3Model, self).modify_tensors(data_torch, name, bid)
+
+
 @ModelBase.register("Gemma3TextModel")
 class EmbeddingGemma(Gemma3Model):
     model_arch = gguf.MODEL_ARCH.GEMMA_EMBEDDING

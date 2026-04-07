@@ -469,6 +469,47 @@ To learn more about model quantization, [read this documentation](tools/quantize
 
 [^1]: [https://huggingface.co/docs/transformers/perplexity](https://huggingface.co/docs/transformers/perplexity)
 
+## gfx906 (MI50) Benchmarks
+
+Benchmarks comparing upstream llama.cpp vs this fork, with and without TurboQuant KV cache compression.
+Hardware: 4x AMD Instinct MI50 (gfx906), 64 GB HBM2 total, pipeline parallelism (split-mode layer).
+
+### Qwen3.5-27B Dense (Q4_1) — Base vs Fork vs TurboQuant
+
+| Config | pp32 | pp128 | pp512 | pp2048 | pp8192 | tg128 |
+|--------|-----:|------:|------:|-------:|-------:|------:|
+| Upstream llama.cpp (f16 KV) | 125.74 | 216.05 | 284.99 | 333.75 | 336.82 | 23.11 |
+| **This fork (f16 KV)** | 113.32 | 243.89 | 318.06 | **679.07** | **826.02** | **26.34** |
+| **This fork (turbo3 KV)** | 110.09 | 235.47 | 285.70 | **607.68** | **870.31** | 22.88 |
+
+*All values in tokens/second, 3 repetitions, flash attention on, full GPU offload.*
+
+Key observations:
+- **Fork prompt processing scales far better** — 2x faster than upstream at pp2048, 2.5x at pp8192
+- **Fork generation is 14% faster** (26.34 vs 23.11 tok/s) due to gfx906-optimized kernels
+- **TurboQuant (turbo3)** trades ~13% generation speed for **3.3x more KV cache capacity** (longer contexts)
+- TurboQuant prompt processing is comparable to f16, even slightly faster at pp8192
+
+### Gemma4-26B MoE (Q8_0, 128 experts top-8) — Fork Only
+
+| Config | pp32 | pp128 | pp512 | pp2048 | pp8192 | tg128 |
+|--------|-----:|------:|------:|-------:|-------:|------:|
+| **This fork (f16 KV)** | 303.60 | 538.17 | 991.72 | 2002.10 | 2558.66 | 76.38 |
+
+*Upstream llama.cpp does not support Gemma4. TurboQuant not yet stable on multi-GPU Gemma4 (cross-device tensor copy issue).*
+
+Key observations:
+- **76.38 tok/s generation** — MoE efficiency (only 4B active params per token) makes this very fast
+- **2558 tok/s prompt processing** at 8K context — excellent throughput
+- Gemma4 ISWA architecture (SWA head_dim=256, global head_dim=512) fully supported
+
+### Notes
+
+- Upstream build: llama.cpp `4bf202d4a` (b7975). Fork build: `7b3f7b5` (b25).
+- TurboQuant uses Walsh-Hadamard Transform rotation + 3-bit Lloyd-Max quantization for KV cache compression
+- For Gemma4, TurboQuant auto-promotes global attention layers (head_dim=512) to f16 since no FA kernel supports that dimension
+- All benchmarks use `llama-bench -r 3 -fa 1 -ngl 99`
+
 ## [`llama-bench`](tools/llama-bench)
 
 #### Benchmark the performance of the inference for various parameters.

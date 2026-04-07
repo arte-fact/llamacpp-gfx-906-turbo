@@ -194,6 +194,21 @@ llama_kv_cache::llama_kv_cache(
             }
         }
 
+        // Turbo types require FA, but FA kernels only support head_dim <= 256.
+        // For layers with larger head_dim (e.g. Gemma4 global layers: head_dim=512),
+        // promote turbo → f16 so the matmul attention path is used instead.
+        {
+            const uint32_t n_embd_head_k = hparams.n_embd_head_k(il);
+            const bool turbo_k = (layer_type_k == GGML_TYPE_TURBO2_0 || layer_type_k == GGML_TYPE_TURBO3_0 || layer_type_k == GGML_TYPE_TURBO4_0);
+            const bool turbo_v = (layer_type_v == GGML_TYPE_TURBO2_0 || layer_type_v == GGML_TYPE_TURBO3_0 || layer_type_v == GGML_TYPE_TURBO4_0);
+            if (n_embd_head_k > 256 && (turbo_k || turbo_v)) {
+                if (turbo_k) { layer_type_k = GGML_TYPE_F16; }
+                if (turbo_v) { layer_type_v = GGML_TYPE_F16; }
+                LLAMA_LOG_INFO("%s: layer %d: head_dim=%d > 256, promoting turbo KV to f16 (no FA kernel for this head_dim)\n",
+                               __func__, il, n_embd_head_k);
+            }
+        }
+
         ggml_tensor * k = has_k ? ggml_new_tensor_3d(ctx, layer_type_k, n_embd_k_gqa, kv_size, n_stream) : nullptr;
         ggml_tensor * v = has_v ? ggml_new_tensor_3d(ctx, layer_type_v, n_embd_v_gqa, kv_size, n_stream) : nullptr;
 

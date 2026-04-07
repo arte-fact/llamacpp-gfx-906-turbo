@@ -189,6 +189,9 @@ struct llama_hparams {
     uint32_t laurel_rank  = 64;
     uint32_t n_embd_altup = 256;
 
+    // gemma4 per-layer embedding
+    uint32_t n_embd_per_layer = 0;
+
     // needed for sentence-transformers dense layers
     uint32_t dense_2_feat_in  = 0;  // in_features of the 2_Dense
     uint32_t dense_2_feat_out = 0;  // out_features of the 2_Dense
