@@ -628,6 +628,21 @@ common_chat_templates_ptr common_chat_templates_init(const struct llama_model * 
                            "{%- if false %}");
     }
 
+    // Gemma4 template fix: value['type'] can be an array (e.g. ["string", "null"]) in JSON Schema,
+    // but the template assumes it's always a string and applies | upper directly.
+    // Fix: extract first element if it's an array before applying | upper.
+    if (default_template_src.find("value['type'] | upper") != std::string::npos) {
+        string_replace_all(default_template_src,
+            "value['type'] | upper",
+            "(value['type'] if value['type'] is string else value['type'] | first) | upper");
+        string_replace_all(default_template_src,
+            "params['type'] | upper",
+            "(params['type'] if params['type'] is string else params['type'] | first) | upper");
+        string_replace_all(default_template_src,
+            "response_declaration['type'] | upper",
+            "(response_declaration['type'] if response_declaration['type'] is string else response_declaration['type'] | first) | upper");
+    }
+
     // TODO @aldehir : this is a temporary fix, pending Minja changes
     // Ref: https://github.com/ggml-org/llama.cpp/pull/17713#issuecomment-3631342664
     if (default_template_src.find("[TOOL_CALLS]") != std::string::npos
