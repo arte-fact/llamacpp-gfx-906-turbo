@@ -496,18 +496,32 @@ Key observations:
 |--------|-----:|------:|------:|-------:|-------:|------:|
 | **This fork (f16 KV)** | 303.60 | 538.17 | 991.72 | 2002.10 | 2558.66 | 76.38 |
 
-*Upstream llama.cpp does not support Gemma4. TurboQuant not yet stable on multi-GPU Gemma4 (cross-device tensor copy issue).*
+*Upstream llama.cpp does not support Gemma4 ISWA. TurboQuant crashes on multi-GPU Gemma4 (cross-device tensor copy issue).*
 
 Key observations:
 - **76.38 tok/s generation** — MoE efficiency (only 4B active params per token) makes this very fast
 - **2558 tok/s prompt processing** at 8K context — excellent throughput
 - Gemma4 ISWA architecture (SWA head_dim=256, global head_dim=512) fully supported
 
+### Gemma4-31B Dense (Q4_0) — Fork Only
+
+| Config | pp32 | pp128 | pp512 | pp2048 | pp8192 | tg128 |
+|--------|-----:|------:|------:|-------:|-------:|------:|
+| **This fork (f16 KV)** | 99.86 | 211.50 | 237.03 | 175.80 | 87.69 | 20.39 |
+
+*TurboQuant (turbo3) crashes on multi-GPU Gemma4 due to cross-device tensor copy issue (same as 26B MoE). Single-GPU turbo3 works but 31B doesn't fit on one MI50.*
+
+Key observations:
+- **20.39 tok/s generation** — reasonable for a 31B dense model across 4×MI50
+- Prompt processing peaks at pp512 (237 tok/s) then declines — likely memory bandwidth saturation on the dense architecture
+- Gemma4 ISWA global layers (head_dim=512) use Flash Attention vec kernel with f16 KV (no matmul fallback)
+
 ### Notes
 
 - Upstream build: llama.cpp `4bf202d4a` (b7975). Fork build: `7b3f7b5` (b25).
 - TurboQuant uses Walsh-Hadamard Transform rotation + 3-bit Lloyd-Max quantization for KV cache compression
-- For Gemma4, TurboQuant auto-promotes global attention layers (head_dim=512) to f16 since no FA kernel supports that dimension
+- For Gemma4, TurboQuant auto-promotes global attention layers (head_dim=512) to f16; FA vec kernel now supports D=512
+- TurboQuant + Gemma4 multi-GPU is a known crash (cross-device tensor copy) — tracked for future fix
 - All benchmarks use `llama-bench -r 3 -fa 1 -ngl 99`
 
 ## [`llama-bench`](tools/llama-bench)
