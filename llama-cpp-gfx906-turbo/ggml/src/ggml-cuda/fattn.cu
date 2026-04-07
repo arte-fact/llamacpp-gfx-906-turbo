@@ -129,7 +129,8 @@ struct turbo_fp16_shadow {
 
 static std::unordered_map<void *, turbo_fp16_shadow> g_turbo_shadows;
 
-static void turbo_shadow_sync(
+// Returns false if shadow buffer allocation fails (OOM) — caller should fall back to native path.
+static bool turbo_shadow_sync(
         const ggml_tensor * T, turbo_fp16_shadow & sh,
         ggml_tensor & T_f16, cudaStream_t stream) {
 
@@ -142,7 +143,20 @@ static void turbo_shadow_sync(
     const size_t sz = ne0 * ne1 * ne2 * sizeof(half);
     if (sh.capacity < ne1 || sh.ne0 != ne0 || sh.ne2 != ne2 || sh.src_data != T->data) {
         if (sh.buf) { CUDA_CHECK(cudaFree(sh.buf)); sh.buf = nullptr; }
-        CUDA_CHECK(cudaMalloc(&sh.buf, sz));
+        cudaError_t err = cudaMalloc(&sh.buf, sz);
+        if (err != cudaSuccess) {
+            // OOM — clear error and signal caller to use native turbo path
+            (void)cudaGetLastError();
+            sh.buf      = nullptr;
+            sh.capacity = 0;
+            static bool warned = false;
+            if (!warned) {
+                fprintf(stderr, "turbo_shadow_sync: shadow cache alloc failed (%.1f MiB), falling back to native turbo FA\n",
+                        sz / (1024.0 * 1024.0));
+                warned = true;
+            }
+            return false;
+        }
         sh.capacity = ne1;
         sh.ne0      = ne0;
         sh.ne2      = ne2;
@@ -193,6 +207,7 @@ static void turbo_shadow_sync(
     T_f16.nb[1]     = ne0 * sizeof(half);
     T_f16.nb[2]     = ne0 * ne1 * sizeof(half);
     T_f16.nb[3]     = ne0 * ne1 * ne2 * sizeof(half);
+    return true;
 }
 
 // GFX906 Q8 Flash Attention kernel
@@ -808,18 +823,23 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
     ggml_tensor K_f16, V_f16;
     ggml_tensor * dst_mod = dst;
     ggml_tensor dst_copy = *dst;
+    bool shadow_ok = true;
 
     if (turbo_k) {
         turbo_fp16_shadow & shK = g_turbo_shadows[K->data];
-        turbo_shadow_sync(K, shK, K_f16, stream);
-        dst_copy.src[1] = &K_f16;
-        dst_mod = &dst_copy;
+        if (!turbo_shadow_sync(K, shK, K_f16, stream)) { shadow_ok = false; }
+        else { dst_copy.src[1] = &K_f16; dst_mod = &dst_copy; }
     }
-    if (turbo_v) {
+    if (turbo_v && shadow_ok) {
         turbo_fp16_shadow & shV = g_turbo_shadows[V->data];
-        turbo_shadow_sync(V, shV, V_f16, stream);
-        dst_copy.src[2] = &V_f16;
-        dst_mod = &dst_copy;
+        if (!turbo_shadow_sync(V, shV, V_f16, stream)) { shadow_ok = false; }
+        else { dst_copy.src[2] = &V_f16; dst_mod = &dst_copy; }
+    }
+
+    // Shadow cache OOM — fall back to native turbo vec kernel (slower but no extra memory)
+    if (!shadow_ok) {
+        ggml_cuda_flash_attn_ext_vec(ctx, dst);
+        return;
     }
 
     switch (ggml_cuda_get_best_fattn_kernel(ggml_cuda_get_device(), dst_mod)) {
