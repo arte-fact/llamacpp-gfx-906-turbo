@@ -124,6 +124,7 @@ struct turbo_fp16_shadow {
     int64_t  filled    = 0;
     int64_t  ne0       = 0;
     int64_t  ne2       = 0;
+    int64_t  ne3       = 0;      // stream dimension (ne[3]), 1 for single-slot
     void *   src_data  = nullptr;
 };
 
@@ -137,11 +138,12 @@ static bool turbo_shadow_sync(
     const int64_t ne0 = T->ne[0];
     const int64_t ne1 = T->ne[1];
     const int64_t ne2 = T->ne[2];
+    const int64_t ne3 = std::max(T->ne[3], (int64_t)1);  // stream dimension, 1 for single-slot
 
     // Always re-dequant fully — contiguous layout requires consistent head stride = ne0*ne1
     // which changes as ne1 grows, so incremental fill is not possible with contiguous layout.
-    const size_t sz = ne0 * ne1 * ne2 * sizeof(half);
-    if (sh.capacity < ne1 || sh.ne0 != ne0 || sh.ne2 != ne2 || sh.src_data != T->data) {
+    const size_t sz = ne0 * ne1 * ne2 * ne3 * sizeof(half);
+    if (sh.capacity < ne1 || sh.ne0 != ne0 || sh.ne2 != ne2 || sh.ne3 != ne3 || sh.src_data != T->data) {
         if (sh.buf) { CUDA_CHECK(cudaFree(sh.buf)); sh.buf = nullptr; }
         cudaError_t err = cudaMalloc(&sh.buf, sz);
         if (err != cudaSuccess) {
@@ -151,8 +153,8 @@ static bool turbo_shadow_sync(
             sh.capacity = 0;
             static bool warned = false;
             if (!warned) {
-                fprintf(stderr, "turbo_shadow_sync: shadow cache alloc failed (%.1f MiB), falling back to native turbo FA\n",
-                        sz / (1024.0 * 1024.0));
+                fprintf(stderr, "turbo_shadow_sync: shadow cache alloc failed (%.1f MiB, ne3=%ld), falling back to native turbo FA\n",
+                        sz / (1024.0 * 1024.0), (long)ne3);
                 warned = true;
             }
             return false;
@@ -160,6 +162,7 @@ static bool turbo_shadow_sync(
         sh.capacity = ne1;
         sh.ne0      = ne0;
         sh.ne2      = ne2;
+        sh.ne3      = ne3;
         sh.src_data = T->data;
     }
 
@@ -169,30 +172,35 @@ static bool turbo_shadow_sync(
     if (n_rows > 0) {
         const int64_t dst_row_stride  = ne0;
         const int64_t dst_head_stride = ne0 * ne1;  // contiguous layout: head stride = ne0 * ne1
+        const int threads = ne0 > 1024 ? 1024 : (int)ne0;
 
-        // kernel: src_row = src + head * src_nb2 + abs_row * src_nb1
-        // Pass T->nb[1] and T->nb[2] in original order — the kernel parameters
-        // match the tensor view dimensions directly.
-        dim3 grid((int)n_rows, (int)ne2);
-        const int threads = ne0 > 1024 ? 1024 : (int)ne0;  // cap for large n_embd_k_gqa (e.g. Gemma4 global layers)
-        if (T->type == GGML_TYPE_TURBO4_0) {
-            k_turbo4_dequant_rows_f16<<<grid, threads, 0, stream>>>(
-                (const char *)T->data, sh.buf, ne0,
-                row_start, n_rows,
-                T->nb[1], T->nb[2],
-                dst_row_stride, dst_head_stride);
-        } else if (T->type == GGML_TYPE_TURBO2_0) {
-            k_turbo2_dequant_rows_f16<<<grid, threads, 0, stream>>>(
-                (const char *)T->data, sh.buf, ne0,
-                row_start, n_rows,
-                T->nb[1], T->nb[2],
-                dst_row_stride, dst_head_stride);
-        } else {
-            k_turbo3_dequant_rows_f16<<<grid, threads, 0, stream>>>(
-                (const char *)T->data, sh.buf, ne0,
-                row_start, n_rows,
-                T->nb[1], T->nb[2],
-                dst_row_stride, dst_head_stride);
+        // Dequant each stream slice separately to handle ne[3] > 1 (multi-slot).
+        // Each stream slice has its own row stride in the source tensor (T->nb[3]),
+        // and we write each slice contiguously into the shadow buffer.
+        for (int64_t s = 0; s < ne3; ++s) {
+            const char * src_stream = (const char *)T->data + s * T->nb[3];
+            half * dst_stream = sh.buf + s * (ne0 * ne1 * ne2);
+
+            dim3 grid((int)n_rows, (int)ne2);
+            if (T->type == GGML_TYPE_TURBO4_0) {
+                k_turbo4_dequant_rows_f16<<<grid, threads, 0, stream>>>(
+                    src_stream, dst_stream, ne0,
+                    row_start, n_rows,
+                    T->nb[1], T->nb[2],
+                    dst_row_stride, dst_head_stride);
+            } else if (T->type == GGML_TYPE_TURBO2_0) {
+                k_turbo2_dequant_rows_f16<<<grid, threads, 0, stream>>>(
+                    src_stream, dst_stream, ne0,
+                    row_start, n_rows,
+                    T->nb[1], T->nb[2],
+                    dst_row_stride, dst_head_stride);
+            } else {
+                k_turbo3_dequant_rows_f16<<<grid, threads, 0, stream>>>(
+                    src_stream, dst_stream, ne0,
+                    row_start, n_rows,
+                    T->nb[1], T->nb[2],
+                    dst_row_stride, dst_head_stride);
+            }
         }
     }
 
